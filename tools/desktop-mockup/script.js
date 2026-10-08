@@ -56,7 +56,8 @@
     active: false, busy: false, stopRR: null, mr: null, chunks: [],
     canvas: null, timerId: null, watchdog: null, startedAt: 0, frames: 0,
     events: [], rrwebOk: false, videoBlob: null, mime: '', duration: 0, h2cFailed: false,
-    failed: 0, failedRun: 0, lastError: '', mrStarted: false
+    failed: 0, failedRun: 0, lastError: '', mrStarted: false,
+    track: null, manual: false, lastShot: null, stream: null
   };
   let player = null, rpTimer = null;
 
@@ -679,8 +680,8 @@
     const sx = (win && win.pageXOffset) || doc.documentElement.scrollLeft || 0;
     const cv = rec.canvas;
     /* Render first, paint second. Clearing the canvas up front would leave it
-       white for the whole (slow) html2canvas pass, and captureStream would bake
-       those white frames into the video. drawImage overwrites atomically. */
+       white for the whole (slow) html2canvas pass, and the capture stream would
+       bake those white frames into the video. drawImage overwrites atomically. */
     const shot = await html2canvas(doc.documentElement, {
       backgroundColor: '#ffffff',
       scale: cv.width / w,
@@ -693,6 +694,7 @@
       removeContainer: true
     });
     ctx.drawImage(shot, 0, 0, cv.width, cv.height);
+    rec.lastShot = shot;      // held so a slow capture can repeat the last frame
   }
 
   async function startRecording() {
@@ -710,6 +712,7 @@
     rec.active = true; rec.busy = false; rec.frames = 0; rec.chunks = [];
     rec.events = []; rec.rrwebOk = false; rec.h2cFailed = false;
     rec.failed = 0; rec.failedRun = 0; rec.lastError = ''; rec.mrStarted = false;
+    rec.track = null; rec.manual = false; rec.lastShot = null;
     rec.startedAt = performance.now();
 
     /* ── UI flips first: the setup below is async and must never look like a hang */
@@ -769,8 +772,21 @@
 
     const mime = pickVideoMime();
     try {
-      const stream = cv.captureStream(fps);
+      /* captureStream(0) + requestFrame() hands us exact control of frame
+         timing. With a positive frame rate the browser only emits a frame when
+         the canvas actually changes, so a slow html2canvas pass (or a page
+         re-render) leaves a gap and the finished video comes out SHORTER than
+         the recording. Driving it manually keeps the clip real-time. */
+      let stream, manual = false, track = null;
+      try {
+        stream = cv.captureStream(0);
+        track = stream.getVideoTracks()[0];
+        manual = !!(track && typeof track.requestFrame === 'function');
+      } catch (e) { stream = null; }
+      if (!stream || !manual) { stream = cv.captureStream(fps); track = stream.getVideoTracks()[0] || null; }
       rec.stream = stream;
+      rec.track = track;
+      rec.manual = manual;
       const bitrate = clamp(Math.round(cv.width * cv.height * fps * 0.11), 2.5e6, 12e6);
       rec.mr = mime ? new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate })
                     : new MediaRecorder(stream);
@@ -832,7 +848,12 @@
           $('#recStats').textContent = (rec.frames / (el / 1000)).toFixed(1) + ' fps captured'
             + (rec.failed ? ' · ' + rec.failed + ' skipped' : '');
         }
+      } else if (rec.manual && rec.lastShot) {
+        /* a capture is still in flight — re-commit the previous frame so the
+           clip keeps real-time pacing instead of silently losing seconds */
+        ctx.drawImage(rec.lastShot, 0, 0, rec.canvas.width, rec.canvas.height);
       }
+      if (rec.manual) { try { rec.track.requestFrame(); } catch (e) {} }
       if (rec.active) rec.timerId = setTimeout(loop, Math.max(8, interval - (performance.now() - last)));
     };
     rec.timerId = setTimeout(loop, 0);
@@ -859,6 +880,7 @@
     }
     rec.stream = null;
     rec.mrStarted = false;
+    rec.track = null; rec.manual = false; rec.lastShot = null;
     rec.duration = dur;
     rec.videoBlob = rec.chunks.length ? new Blob(rec.chunks, { type: rec.mime || 'video/webm' }) : null;
     rec.chunks = [];
