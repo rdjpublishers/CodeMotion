@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CodeMotion — Turn Code Into Animated Video | RDJ Publishers</title>
+<meta name="description" content="CodeMotion renders your code into a real animated MP4 you can download. Pick a language, a theme and a video size, press Generate Animation, then Download Video. Rendered on your own device — nothing to upload.">
+<meta name="keywords" content="code to video, animate code, syntax highlighting video, code animation generator, mp4 from code, CodeMotion">
+<link rel="canonical" href="https://rdjpublishers.com/CodeMotion/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="RDJ Publishers">
+<meta property="og:title" content="CodeMotion — Turn Code Into Animated Video">
+<meta property="og:description" content="Generate an animated code clip and download it as a real MP4. Runs entirely in your browser.">
+<meta property="og:url" content="https://rdjpublishers.com/CodeMotion/">
+<meta property="og:image" content="https://rdjpublishers.com/CodeMotion/Logo.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://rdjpublishers.com/CodeMotion/Logo.png">
+<meta name="theme-color" content="#07070a">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0b10'/%3E%3Cpath d='M22 22 12 32l10 10M42 22l10 10-10 10M36 16l-8 32' stroke='%23bd93f9' stroke-width='4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+
+<!-- Consent manager + analytics -->
+<script src="https://rdjpublishers.com/assets/consent.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-G5M1ZPJW29"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-G5M1ZPJW29');
+</script>
+<!-- AdSense -->
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8728382905346597" crossorigin="anonymous"></script>
+</head>
+
+<body>
+<a class="skip" href="#workbench">Skip to the editor</a>
+
+<header class="topbar">
+  <a class="brand" href="https://rdjpublishers.com/CodeMotion/" aria-label="CodeMotion home">
+    <span class="brand-mark" aria-hidden="true"></span>
+    New&nbsp;Creative
+  </a>
+  <nav class="topnav" aria-label="Primary">
+    <a href="https://rdjpublishers.com/">Home</a>
+    <a href="https://rdjpublishers.com/faq.html">FAQ</a>
+    <a href="https://rdjpublishers.com/contact.html">Contact</a>
+    <a class="is-active" href="https://rdjpublishers.com/CodeMotion/" aria-current="page">CodeMotion</a>
+  </nav>
+</header>
+
+<main>
+  <!-- ───────────────────────── toolbar ───────────────────────── -->
+  <section class="toolbar">
+    <div class="toolbar-title">
+      <h1>CodeMotion</h1>
+      <p>Type your code — we render it into a downloadable video</p>
+    </div>
+
+    <div class="toolbar-actions">
+      <label class="sr-only" for="exampleSelect">Load an example</label>
+      <select id="exampleSelect" class="select">
+        <option value="">Load example…</option>
+      </select>
+      <button id="btnSave" class="btn btn-ghost" type="button">Save Config</button>
+      <button id="btnLoad" class="btn btn-ghost" type="button">Load Config</button>
+      <input type="file" id="fileConfig" accept="application/json,.json" hidden>
+      <button id="btnGenerateTop" class="btn btn-primary" type="button">
+        <span class="btn-ico" aria-hidden="true">▶</span> Generate Animation
+      </button>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── workbench ───────────────────────── -->
+  <section class="workbench" id="workbench">
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <p class="stage-hints" id="stageHints">
+          <span>DRAG → ORBIT</span>
+          <span>SHIFT + DRAG → ROLL</span>
+          <span>SCROLL → ZOOM</span>
+        </p>
+        <div class="stage-frame" id="stageFrame">
+          <canvas id="preview" aria-label="Animation preview"></canvas>
+        </div>
+        <div class="stage-badge" id="stageBadge" hidden>Rendering…</div>
+      </div>
+
+      <div class="player" id="player">
+        <button class="pbtn" id="btnPlay" type="button" title="Play the animation">▶ Play</button>
+        <button class="pbtn" id="btnReplay" type="button" title="Replay from the start">↻ Replay</button>
+        <div class="scrub">
+          <input type="range" id="scrub" min="0" max="1000" value="0" aria-label="Animation timeline">
+          <span class="time" id="timeLabel">0.0s</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────────────────────── sidebar ───────────────────────── -->
+    <aside class="sidebar">
+      <div class="tabs" role="tablist">
+        <button class="tab is-on" id="tabStyle" role="tab" aria-selected="true" aria-controls="paneStyle" type="button">Style</button>
+        <button class="tab" id="tabView" role="tab" aria-selected="false" aria-controls="paneView" type="button">View</button>
+      </div>
+
+      <!-- STYLE -->
+      <div class="pane is-on" id="paneStyle" role="tabpanel" aria-labelledby="tabStyle">
+        <div class="group">
+          <div class="group-head"><span>Language</span></div>
+          <div class="row2">
+            <select id="selLang" class="select" aria-label="Language"></select>
+            <select id="selTheme" class="select" aria-label="Theme"></select>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-head">
+            <span>Code</span>
+            <em id="codeMeta">0 lines</em>
+          </div>
+          <textarea id="code" class="code-input" spellcheck="false" autocomplete="off"
+            autocapitalize="off" wrap="off" aria-label="Source code"></textarea>
+        </div>
+
+        <div class="group">
+          <div class="group-head"><span>Layout</span></div>
+          <label class="slider">
+            <span>Panel width <em id="valPanelWidth">86%</em></span>
+            <input type="range" id="rngPanelWidth" min="35" max="100" step="1" value="86">
+          </label>
+          <label class="slider">
+            <span>Font size <em id="valFontScale">100%</em></span>
+            <input type="range" id="rngFontScale" min="55" max="170" step="1" value="100">
+          </label>
+          <label class="slider">
+            <span>Corner radius <em id="valRadius">0.9</em></span>
+            <input type="range" id="rngRadius" min="0" max="20" step="1" value="9">
+          </label>
+          <label class="slider">
+            <span>Background</span>
+            <select id="selBackground" class="select">
+              <option value="glow">Soft glow</option>
+              <option value="grid">Grid</option>
+              <option value="dots">Dots</option>
+              <option value="solid">Solid</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="group">
+          <div class="group-head"><span>Chrome</span></div>
+          <label class="check"><input type="checkbox" id="chkChrome" checked><span>Window bar &amp; filename</span></label>
+          <label class="check"><input type="checkbox" id="chkNumbers" checked><span>Line numbers</span></label>
+          <label class="check"><input type="checkbox" id="chkProgress" checked><span>Progress bar</span></label>
+          <label class="check"><input type="checkbox" id="chkWatermark"><span>CodeMotion watermark</span></label>
+        </div>
+      </div>
+
+      <!-- VIEW -->
+      <div class="pane" id="paneView" role="tabpanel" aria-labelledby="tabView" hidden>
+        <div class="group">
+          <div class="group-head"><span>Video size</span></div>
+          <div class="chips" id="sizeChips">
+            <button type="button" class="chip" data-w="1080" data-h="1920">9:16 Vertical</button>
+            <button type="button" class="chip is-on" data-w="1920" data-h="1080">16:9 Landscape</button>
+            <button type="button" class="chip" data-w="1080" data-h="1080">1:1 Square</button>
+            <button type="button" class="chip" data-w="1280" data-h="720">720p</button>
+            <button type="button" class="chip" data-w="1080" data-h="1350">4:5 Feed</button>
+          </div>
+          <div class="row2">
+            <label class="num">W<input type="number" id="inpW" min="240" max="3840" step="2" value="1920"></label>
+            <label class="num">H<input type="number" id="inpH" min="240" max="3840" step="2" value="1080"></label>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-head"><span>Duration</span></div>
+          <div class="chips" id="durChips">
+            <button type="button" class="chip" data-d="5">5s</button>
+            <button type="button" class="chip" data-d="10">10s</button>
+            <button type="button" class="chip" data-d="15">15s</button>
+            <button type="button" class="chip" data-d="20">20s</button>
+            <button type="button" class="chip" data-d="30">30s</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-head"><span>Frame rate</span></div>
+          <div class="chips" id="fpsChips">
+            <button type="button" class="chip" data-f="24">24 fps</button>
+            <button type="button" class="chip is-on" data-f="30">30 fps</button>
+            <button type="button" class="chip" data-f="60">60 fps</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-head"><span>Quality</span></div>
+          <select id="selQuality" class="select">
+            <option value="draft">Draft — fastest</option>
+            <option value="standard" selected>Standard — recommended</option>
+            <option value="high">High — larger file</option>
+          </select>
+          <p class="hint" id="codecInfo">Checking encoder…</p>
+        </div>
+
+        <div class="group">
+          <div class="group-head"><span>Camera</span></div>
+          <select id="selCamera" class="select">
+            <option value="follow">Follow the typing</option>
+            <option value="static">Locked frame</option>
+            <option value="orbit">Slow orbit</option>
+          </select>
+          <label class="slider">
+            <span>Zoom <em id="valZoom">0.30</em></span>
+            <input type="range" id="rngZoom" min="0" max="120" step="1" value="30">
+          </label>
+          <label class="slider">
+            <span>Follow <em id="valFollow">0.90</em></span>
+            <input type="range" id="rngFollow" min="0" max="100" step="1" value="90">
+          </label>
+          <label class="slider">
+            <span>Drift <em id="valDrift">1.0</em></span>
+            <input type="range" id="rngDrift" min="0" max="20" step="1" value="10">
+          </label>
+        </div>
+      </div>
+
+      <div class="side-ad">
+        <!--
+          Ad placement.
+          The loader in <head> already activates Auto Ads for ca-pub-8728382905346597,
+          so nothing is required here. To pin a unit to this exact spot instead,
+          create a Display ad in the AdSense dashboard, then replace this comment with:
+
+          <ins class="adsbygoogle" style="display:block"
+               data-ad-client="ca-pub-8728382905346597"
+               data-ad-slot="YOUR_SLOT_ID"
+               data-ad-format="auto" data-full-width-responsive="true"></ins>
+          <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+        -->
+      </div>
+    </aside>
+  </section>
+
+  <!-- ───────────────────────── render bar ───────────────────────── -->
+  <section class="renderbar" aria-live="polite">
+    <div class="render-status">
+      <div class="status-line">
+        <span class="dot" id="statusDot"></span>
+        <strong id="statusText">Ready to render</strong>
+        <span class="status-sub" id="statusSub">10s · 1920 × 1080 · 30 fps</span>
+      </div>
+      <div class="progress" id="progressWrap" hidden>
+        <div class="bar"><i id="progressBar"></i></div>
+        <span id="progressPct">0%</span>
+      </div>
+    </div>
+
+    <div class="render-actions">
+      <button id="btnGenerate" class="btn btn-primary btn-lg" type="button">
+        <span class="btn-ico" aria-hidden="true">▶</span> <span id="btnGenerateLabel">Generate Animation</span>
+      </button>
+      <button id="btnPreview2" class="btn btn-ghost" type="button" disabled>▶ Preview</button>
+      <button id="btnDownload" class="btn btn-download" type="button" disabled>
+        <span aria-hidden="true">↓</span> Download Video
+      </button>
+      <button id="btnCancel" class="btn btn-ghost" type="button" hidden>Cancel</button>
+    </div>
+  </section>
+
+  <div class="notice" id="staleNotice" hidden>
+    <span>Settings changed — Generate new animation</span>
+    <button id="btnRegen" class="btn btn-ghost btn-sm" type="button">Generate New Animation</button>
+  </div>
+
+  <section class="history" id="history" hidden>
+    <div class="history-head">
+      <h2>Generated animations</h2>
+      <span id="historyMeta"></span>
+    </div>
+    <div class="history-list" id="historyList"></div>
+  </section>
+
+  <section class="steps">
+    <h2>How it works</h2>
+    <ol>
+      <li><b>Code</b> — paste or type your snippet.</li>
+      <li><b>Animation timeline</b> — typing, camera moves and pacing are computed from your settings.</li>
+      <li><b>Render</b> — every frame is drawn on a canvas and encoded frame by frame.</li>
+      <li><b>Video file</b> — a real MP4 you can save and post.</li>
+      <li><b>Download</b> — press Download Video and keep the file.</li>
+    </ol>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="foot-grid">
+    <div>
+      <div class="foot-brand">CodeMotion</div>
+      <p>An animation renderer for source code. Everything happens in your browser — your code never leaves this page.</p>
+    </div>
+    <nav aria-label="Footer">
+      <h3>Pages</h3>
+      <ul>
+        <li><a href="https://rdjpublishers.com/">Home</a></li>
+        <li><a href="https://rdjpublishers.com/CodeMotion/">CodeMotion</a></li>
+        <li><a href="https://rdjpublishers.com/about.html">About Page</a></li>
+        <li><a href="https://rdjpublishers.com/contact.html">Contact Page</a></li>
+        <li><a href="https://rdjpublishers.com/faq.html">FAQ</a></li>
+      </ul>
+    </nav>
+    <nav aria-label="Legal">
+      <h3>Legal</h3>
+      <ul>
+        <li><a href="https://rdjpublishers.com/privacy-policy.html">Privacy policy</a></li>
+        <li><a href="https://rdjpublishers.com/terms.html">Terms and condition</a></li>
+        <li><a href="https://rdjpublishers.com/disclaimer.html">Disclaimer</a></li>
+        <li><a href="https://rdjpublishers.com/sitemap.xml">Sitemap</a></li>
+      </ul>
+    </nav>
+  </div>
+  <p class="copy">&copy; <span id="year">2026</span> RDJ Publishers. All rights reserved.</p>
+</footer>
+
+<script src="js/themes.js"></script>
+<script src="js/highlight.js"></script>
+<script src="js/animator.js"></script>
+<script src="js/mp4.js"></script>
+<script src="js/exporter.js"></script>
+<script src="js/examples.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

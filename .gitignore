@@ -1,0 +1,11 @@
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# Nothing here should ever be committed
+*.mp4
+*.webm
+node_modules/
+.env
+.env.*
