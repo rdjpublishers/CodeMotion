@@ -125,17 +125,61 @@ toolbar and mockup frame are never in the output.
 | Instant Replay | `rrweb.Replayer` | Scrub, pause, 0.5×–4× speed — no re-render |
 
 The video is a true real-time recording: a 3-second interaction produces a 3-second video, not a
-sped-up clip. The live `fps captured` readout tells you the real capture rate — `html2canvas` is
-the bottleneck, so heavy pages land around 3–8 fps at 1920×1080.
+sped-up clip. The live `fps captured` readout tells you the real capture rate — roughly 4–5 fps
+at 1024×768, dropping at 1920×1080.
+
+## Capture fidelity — read this if overlays vanish from your video
+
+This is the single most important setting, and the reason is not obvious.
+
+html2canvas has two renderers, and the default one **silently drops modern CSS**:
+
+| Renderer | How it works | Result |
+|---|---|---|
+| **Faithful** (default) | Serialises the live DOM into an `<svg><foreignObject>` and lets the *browser* rasterise it | Real CSS. `filter`, `mask-image`, `mix-blend-mode`, `clip-path`, `backdrop-filter` all survive |
+| **Compatible** | html2canvas's own painter | Fast and taint-proof, but drops the effects above |
+
+A `filter: blur(38px)` overlay does not fade out in Compatible mode — it becomes a
+**hard-edged disc**, or disappears entirely. `mask-image` radial fades become solid
+blocks. `clip-path` wipes render unclipped. If a blurred, masked or blended
+animation animates in the preview but is missing or blocky in the video, this is why.
+
+Measured against the browser's own painting of the same frame at 1024×768
+(percentage of pixels that differ):
+
+| region | Compatible | Faithful |
+|---|---|---|
+| `filter: blur()` overlay | 24.9% wrong | **0%** |
+| `mix-blend-mode` | 22.5% wrong | **0%** |
+| `mask-image` | 24.0% wrong | 0.5% |
+| `clip-path` | 28.8% wrong | 7% |
+| **whole frame** | **12.4%** | **1.3%** |
+
+Faithful is roughly **9.5× more accurate**, and is the default for exactly that reason.
+
+### The one thing Faithful cannot do
+
+Faithful needs every asset **same-origin**. A cross-origin asset the browser cannot
+read either taints the canvas or is dropped from the capture.
+
+- **Tainted** → the recorder detects it on the first frame, switches itself to
+  Compatible, finishes the recording, and tells you which effects you are losing.
+  It never dies mid-take.
+- **Dropped** (what Chromium actually does with a non-CORS image) → the asset is
+  simply missing from the video, and the Capture note says so by name.
+
+Fix either one with **Inline remote assets** (on by default). It re-fetches the
+page's `http(s)` images, stylesheets, `@import`s and `url()`s as blobs after each
+page settles. It only works when the CDN sends `Access-Control-Allow-Origin`; if it
+cannot, self-host the asset or add the header.
 
 ### Tuning
 
 - **Resolution `0.5×`** — halves the pixels; roughly 4× faster. Use it for big presets.
 - **Frame rate** — 10 / 15 / 30 fps. Higher costs more CPU; the timing stays correct either way.
-- **Fast render mode** — switches `html2canvas` to `foreignObjectRendering` (DOM → SVG). Much
-  faster, but it can drop effects and it taints the canvas if the page loads any cross-origin
-  asset. Off by default.
-- If a frame fails, it is retried once and then simply repeats the previous image. You only get
+- Faithful and Compatible cost about the same per frame (~4–5 fps at 1024×768 on a
+  mid laptop). Faithful is not the slow option — it is the correct one.
+- If a frame fails, it is retried once and then repeats the previous image. You only get
   a warning if the page is genuinely uncapturable.
 
 ---

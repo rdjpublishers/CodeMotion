@@ -48,6 +48,7 @@
     urls: [],             // every blob url we minted, for revoke
     tree: null,
     view: { w: 1440, h: 900, z: 1 },
+    capMode: 'faithful',
     pendingRender: false,
     renderSeq: 0,
   };
@@ -227,7 +228,21 @@
     function hi() { post('ready', { title: document.title, url: location.href, scroll: [window.pageXOffset, window.pageYOffset] }); }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hi); else hi();
     window.addEventListener('load', function () { post('loaded', { title: document.title }); });
-    window.addEventListener('error', function (e) { post('error', { message: String((e && e.message) || 'script error') }); });
+
+    /* html2canvas's foreignObject renderer can null-deref its own clone iframe
+       while tearing it down. The capture still completes correctly — the
+       console just spams. Swallow exactly that and count it, so anything else
+       still surfaces. */
+    window.__cmIgnored = 0;
+    window.addEventListener('error', function (e) {
+      var m = String((e && e.message) || '');
+      if (m.indexOf('scrollLeft') > -1 && m.indexOf('null') > -1) {
+        e.preventDefault(); e.stopPropagation();
+        window.__cmIgnored++;
+        return;
+      }
+      post('error', { message: m });
+    });
   } + ')();';
 
   /* ═══════════════════════════ HTML rewriting ═══════════════════════════ */
@@ -568,11 +583,36 @@
       if (d.type === 'ready' && d.scroll) {
         try { frame.contentWindow.scrollTo(d.scroll[0], d.scroll[1]); } catch (e) {}
       }
+      if (d.type === 'loaded') scheduleRemoteInline();
       return;
     }
     if (d.type === 'route') handleRoute(d.href);
     if (d.type === 'error') console.warn('[preview]', d.message);
   });
+
+  let remoteTimer = null;
+  function scheduleRemoteInline() {
+    clearTimeout(remoteTimer);
+    remoteTimer = setTimeout(async () => {
+      if (rec.active || !$('#inlineRemote').checked) return;
+      if (!countRemoteAssets()) return;
+      const r = await inlineRemoteAssets();
+      if (rec.active) return;
+      if (r.done) {
+        setStatus('ready', state.currentPage + ' — ' + r.done + ' remote asset' + (r.done > 1 ? 's' : '') + ' inlined');
+      }
+      if (r.failed && capMode() === 'faithful') {
+        /* Chromium drops a cross-origin image it cannot read instead of
+           erroring, so the asset just vanishes from the recording. Say so. */
+        setCapMode('faithful', '');
+        $('#capNote').innerHTML = '<b>' + r.failed + ' remote asset' + (r.failed > 1 ? 's could' : ' could') +
+          ' not be inlined</b> — the server blocks cross-origin reads, so ' +
+          (r.failed > 1 ? 'they will be missing' : 'it will be missing') +
+          ' from the recording. Self-host ' + (r.failed > 1 ? 'them' : 'it') +
+          ', or serve with an <code>Access-Control-Allow-Origin</code> header.';
+      }
+    }, 500);
+  }
 
   function handleRoute(href) {
     if (!href) return;
@@ -672,6 +712,121 @@
     });
   }
 
+  /* ── capture fidelity ───────────────────────────────────────────────────
+     html2canvas has two renderers.
+       faithful — serialises the live DOM into an <svg><foreignObject> and lets
+                  the browser rasterise it. Real CSS, so filter, mask-image,
+                  mix-blend-mode, clip-path and backdrop-filter all survive.
+       compat   — html2canvas's own painter. Fast and taint-proof, but it
+                  silently DROPS CSS filters and masks, which turns a soft
+                  blurred blob into a hard-edged disc.
+     Faithful is the default. Its one weakness is that a cross-origin asset
+     taints the canvas, which would break the video entirely — so we detect
+     that on the first frame and fall back rather than dying. */
+  function capMode() { const s = $('#capMode'); return (s && s.value) || 'faithful'; }
+
+  function isTainted(canvas) {
+    try { canvas.getContext('2d').getImageData(0, 0, 1, 1); return false; }
+    catch (e) { return true; }
+  }
+
+  function setCapMode(m, why) {
+    const sel = $('#capMode');
+    if (sel) sel.value = m;
+    state.capMode = m;
+    $('#capNote').innerHTML = m === 'faithful'
+      ? 'Faithful hands the real DOM to the browser, so blur, masks, blend modes and clip paths survive. It needs every asset same-origin.'
+      : 'Compatible is a taint-proof fallback. It cannot render <b>filter: blur()</b>, <b>mask-image</b>, <b>mix-blend-mode</b> or <b>clip-path</b> — blurred or masked overlays will look wrong or vanish.' + (why ? ' <b>' + why + '</b>' : '');
+  }
+
+  /* Best-effort: pull cross-origin assets into blob URLs so Faithful mode does
+     not taint. Runs once after a page settles, never while recording. */
+  const REMOTE_RE = /^(https?:)?\/\//i;
+  async function inlineRemoteAssets() {
+    const doc = frame.contentDocument;
+    if (!doc || !doc.body) return { done: 0, failed: 0 };
+    const jobs = [];
+
+    const tryBlob = async (url) => {
+      if (!REMOTE_RE.test(url)) return null;
+      const abs = new URL(url, doc.baseURI).href;
+      if (abs.indexOf(location.origin) === 0) return null;      // already same-origin
+      try {
+        const ctl = new AbortController();
+        const to = setTimeout(() => ctl.abort(), 6000);
+        const res = await fetch(abs, { mode: 'cors', signal: ctl.signal, credentials: 'omit' });
+        clearTimeout(to);
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        if (!blob.size) return null;
+        return { url: abs, href: makeBlobUrl(blob) };
+      } catch (e) { return null; }                              // no CORS — leave it alone
+    };
+
+    for (const el of $$('img[src], source[src], video[poster], video[src], audio[src], input[type="image"][src]', doc)) {
+      jobs.push((async () => {
+        const r = await tryBlob(el.getAttribute('src') || el.getAttribute('poster') || '');
+        if (r) { el.setAttribute(el.hasAttribute('src') ? 'src' : 'poster', r.href); return true; }
+        return false;
+      })());
+    }
+    for (const el of $$('[style]', doc)) {
+      const v = el.getAttribute('style') || '';
+      if (!REMOTE_RE.test(v)) continue;
+      const urls = v.match(/url\((['"]?)(https?:)?\/\/[^)'"]+\1\)/gi) || [];
+      if (!urls.length) continue;
+      jobs.push((async () => {
+        let out = v, any = false;
+        for (const raw of urls) {
+          const inner = raw.replace(/^url\(\s*['"]?/, '').replace(/['"]?\s*\)$/, '');
+          const r = await tryBlob(inner);
+          if (r) { out = out.split(raw).join('url("' + r.href + '")'); any = true; }
+        }
+        if (any) el.setAttribute('style', out);
+        return any;
+      })());
+    }
+    for (const el of $$('link[rel~="stylesheet"][href]', doc)) {
+      const href = el.getAttribute('href') || '';
+      if (!REMOTE_RE.test(href)) continue;
+      jobs.push((async () => {
+        const abs = new URL(href, doc.baseURI).href;
+        try {
+          const res = await fetch(abs, { mode: 'cors', credentials: 'omit' });
+          if (!res.ok) return false;
+          let css = await res.text();
+          /* pull the CSS's own url()s and @imports in too, otherwise inlining
+             the stylesheet just moves the cross-origin problem down a level */
+          const nested = css.match(/url\(\s*(['"]?)(https?:)?\/\/[^)'"]+\1\s*\)|@import\s+(?:url\(\s*)?(['"])(https?:)?\/\/[^'"]+\2/gi) || [];
+          for (const raw of nested) {
+            const inner = (raw.replace(/^url\(\s*['"]?/, '').replace(/['"]?\s*\)$/, '')
+                             .replace(/^@import\s+(?:url\(\s*)?['"]?/, '').replace(/['"]?$/, ''));
+            const r = await tryBlob(inner);
+            if (r) css = css.split(raw).join(raw.startsWith('@import') ? '@import url("' + r.href + '")"' : 'url("' + r.href + '")');
+          }
+          const st = doc.createElement('style');
+          st.setAttribute('data-cm-inlined', abs);
+          st.textContent = css;
+          el.replaceWith(st);
+          return true;
+        } catch (e) { return false; }
+      })());
+    }
+    const out = await Promise.all(jobs);
+    return { done: out.filter(Boolean).length, failed: out.length - out.filter(Boolean).length };
+  }
+
+  function countRemoteAssets() {
+    const doc = frame.contentDocument;
+    if (!doc) return 0;
+    let n = 0;
+    for (const el of $$('img[src], source[src], video[poster], video[src], audio[src], link[href], [style]', doc)) {
+      const v = (el.getAttribute('src') || el.getAttribute('poster') || el.getAttribute('href') || el.getAttribute('style') || '');
+      if (REMOTE_RE.test(v)) n++;
+    }
+    return n;
+  }
+
   async function grabFrame(ctx, w, h) {
     const doc = frame.contentDocument;
     if (!doc || !doc.documentElement || !doc.body) return;
@@ -679,8 +834,9 @@
     const sy = (win && win.pageYOffset) || doc.documentElement.scrollTop || 0;
     const sx = (win && win.pageXOffset) || doc.documentElement.scrollLeft || 0;
     const cv = rec.canvas;
+    const faithful = capMode() === 'faithful';
     /* Render first, paint second. Clearing the canvas up front would leave it
-       white for the whole (slow) html2canvas pass, and the capture stream would
+       white for the whole (slow) capture pass, and the capture stream would
        bake those white frames into the video. drawImage overwrites atomically. */
     const shot = await html2canvas(doc.documentElement, {
       backgroundColor: '#ffffff',
@@ -690,9 +846,12 @@
       windowWidth: w, windowHeight: h,
       scrollX: 0, scrollY: 0,
       useCORS: true, allowTaint: false, logging: false, imageTimeout: 10000,
-      foreignObjectRendering: $('#capFast').checked,
+      foreignObjectRendering: faithful,
       removeContainer: true
     });
+    if (faithful && isTainted(shot)) {
+      throw Object.assign(new Error('cross-origin assets taint a faithful capture'), { tainted: true });
+    }
     ctx.drawImage(shot, 0, 0, cv.width, cv.height);
     rec.lastShot = shot;      // held so a slow capture can repeat the last frame
   }
@@ -831,6 +990,15 @@
             }
             break;
           } catch (err) {
+            /* A cross-origin asset taints a faithful capture. Dropping to the
+               compatible renderer is far better than losing the recording, so
+               downgrade once and carry on. */
+            if (err && err.tainted) {
+              setCapMode('compat', 'Switched automatically: this page pulls assets from a CDN that blocks cross-origin reads.');
+              toast('A faithful capture was blocked by a cross-origin asset, so the recorder switched to Compatible mode. Blurred or masked overlays may not appear. Turn on “Inline remote assets” and reload to try again.', 'warn', 11000);
+              attempt--;                 // retry immediately on the new renderer
+              continue;
+            }
             rec.failed++;
             rec.failedRun++;
             rec.lastError = (err && err.message) || String(err);
@@ -1176,6 +1344,8 @@
 
   /* recorder */
   $('#recBtn').addEventListener('click', () => (rec.active ? stopRecording() : startRecording()));
+  $('#capMode').addEventListener('change', (e) => setCapMode(e.target.value, ''));
+  $('#inlineRemote').addEventListener('change', () => { if ($('#inlineRemote').checked) scheduleRemoteInline(); });
   $('#dlVideo').addEventListener('click', () => {
     if (!rec.videoBlob) return;
     download(rec.videoBlob, baseName() + '.webm');

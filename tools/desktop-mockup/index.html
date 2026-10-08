@@ -262,9 +262,17 @@
             <option value="30" selected>30 fps</option>
           </select>
         </div>
+        <div class="field">
+          <span>Capture</span>
+          <select id="capMode" title="How each frame is rasterised">
+            <option value="faithful" selected>Faithful &mdash; exact</option>
+            <option value="compat">Compatible &mdash; safer</option>
+          </select>
+        </div>
+        <p class="hint" id="capNote">Faithful hands the real DOM to the browser, so blur, masks, blend modes and clip paths survive. It needs every asset same-origin.</p>
         <label class="check">
-          <input type="checkbox" id="capFast">
-          <span>Fast render mode <em>(DOM&rarr;SVG, experimental)</em></span>
+          <input type="checkbox" id="inlineRemote" checked>
+          <span>Inline remote assets <em>(CDN fonts &amp; images)</em></span>
         </label>
         <label class="check">
           <input type="checkbox" id="capMouse" checked>
