@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Desktop Mockup &amp; Recorder — CodeMotion Tool | RDJ Publishers</title>
+<meta name="description" content="Zip a static website, drop it into a MacBook mockup and record the preview as an interactive video. Runs entirely in your browser — nothing is uploaded.">
+<meta name="keywords" content="desktop mockup, website recorder, macbook mockup, record website, webm recorder, rrweb, html2canvas, codemotion">
+<link rel="canonical" href="https://rdjpublishers.com/CodeMotion/tools/desktop-mockup/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="RDJ Publishers">
+<meta property="og:title" content="Desktop Mockup &amp; Recorder — CodeMotion Tool">
+<meta property="og:description" content="Drop a zipped static site into a MacBook mockup and record the preview as a video. 100% client-side.">
+<meta property="og:url" content="https://rdjpublishers.com/CodeMotion/tools/desktop-mockup/">
+<meta property="og:image" content="https://rdjpublishers.com/CodeMotion/Logo.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://rdjpublishers.com/CodeMotion/Logo.png">
+<meta name="theme-color" content="#07070a">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0b10'/%3E%3Crect x='12' y='16' width='40' height='26' rx='3' fill='none' stroke='%23bd93f9' stroke-width='3'/%3E%3Cpath d='M8 50h48l-4-8H12z' fill='%23bd93f9'/%3E%3Ccircle cx='20' cy='23' r='2' fill='%23ff6b6b'/%3E%3Ccircle cx='27' cy='23' r='2' fill='%23ffb454'/%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<!-- Tailwind via CDN — no build step. Preflight is off: this tool's layout lives
+     entirely in style.css so the page still looks right offline. -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  if (window.tailwind) {
+    tailwind.config = {
+      corePlugins: { preflight: false },
+      theme: {
+        extend: {
+          colors: {
+            bg: 'var(--bg)', panel: 'var(--panel)', panel2: 'var(--panel-2)',
+            line: 'var(--line)', ink: 'var(--ink)', muted: 'var(--ink-3)',
+            accent: 'var(--accent)', accent2: 'var(--accent-2)',
+            good: 'var(--good)', warn: 'var(--warn)', bad: 'var(--bad)'
+          },
+          fontFamily: {
+            ui: 'var(--ui)',
+            mono: 'var(--mono)'
+          }
+        }
+      }
+    };
+  }
+</script>
+
+<link rel="stylesheet" href="libs/rrweb.css">
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+<a class="skip" href="#stage">Skip to the preview</a>
+
+<!-- ═══════════════════════════ header (CodeMotion) ═══════════════════════════ -->
+<header class="topbar">
+  <a class="brand" href="https://rdjpublishers.com/CodeMotion/" aria-label="CodeMotion home">
+    <span class="brand-mark" aria-hidden="true"></span>
+    New&nbsp;Creative
+  </a>
+  <nav class="topnav" aria-label="Primary">
+    <a href="https://rdjpublishers.com/">Home</a>
+    <a href="https://rdjpublishers.com/faq.html">FAQ</a>
+    <a href="https://rdjpublishers.com/contact.html">Contact</a>
+    <a href="../">CodeMotion</a>
+    <a class="is-active" href="./" aria-current="page">Desktop Mockup</a>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ═══════════════════════════ toolbar ═══════════════════════════ -->
+  <section class="toolbar">
+    <div class="toolbar-title">
+      <h1>Desktop Mockup &amp; Recorder</h1>
+      <p>Zip a static site &rarr; preview it in a MacBook &rarr; record the preview as a video</p>
+    </div>
+    <div class="toolbar-actions">
+      <span class="pill" id="privacyPill" title="Nothing ever leaves your device">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        100% local
+      </span>
+      <button class="btn" id="themeBtn" type="button" title="Toggle light / dark">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        <span id="themeLabel">Light</span>
+      </button>
+      <a class="btn" href="https://github.com/rdjpublishers/CodeMotion" target="_blank" rel="noopener">
+        <svg class="ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.34-1.28-1.7-1.28-1.7-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.12 3.05.74.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.4-5.26 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5z"/></svg>
+        CodeMotion
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ upload engine ═══════════════════════════ -->
+  <section class="dropwrap" id="dropwrap">
+    <div class="dropzone" id="dropzone" tabindex="0" role="button"
+         aria-label="Drop a zipped website here, or press Enter to browse">
+      <input type="file" id="fileInput" accept=".zip,application/zip" hidden>
+      <svg class="dz-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <path d="M7 9l5-5 5 5"/><path d="M12 4v12"/>
+      </svg>
+      <h2>Drop a <code>.zip</code> of your static site</h2>
+      <p>Unzipped in your browser with JSZip. Nothing is uploaded to any server.</p>
+      <div class="dz-actions">
+        <button class="btn btn-primary" id="browseBtn" type="button">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          Browse files
+        </button>
+        <span class="dz-hint">or paste the zip &mdash; <kbd>Ctrl</kbd>+<kbd>V</kbd></span>
+      </div>
+    </div>
+    <ul class="dz-notes">
+      <li><b>Include the whole site.</b> Every <code>index.html</code>, folder, CSS file, font and image is read from the zip.</li>
+      <li><b>No server needed.</b> Paths like <code>/style.css</code>, <code>./assets/img.png</code> and <code>../css/app.css</code> are rewritten to in-memory blob URLs.</li>
+      <li><b>Multi-page is fine.</b> Clicking a link inside the mockup loads the next page <em>from the zip</em>, not from the internet.</li>
+    </ul>
+  </section>
+
+  <!-- ═══════════════════════════ workbench ═══════════════════════════ -->
+  <div class="workbench" id="workbench" hidden>
+
+    <!-- ─────────── left: file explorer ─────────── -->
+    <aside class="sidebar side-left" aria-label="File explorer">
+      <div class="tabs">
+        <button class="tab is-on" type="button" data-tab="files">Files</button>
+        <button class="tab" type="button" data-tab="source">Rewritten&nbsp;HTML</button>
+      </div>
+      <div class="pane" id="filesPane">
+        <div class="pane-head">
+          <span class="lbl" id="zipName">project.zip</span>
+          <button class="mini" id="newZipBtn" type="button" title="Load a different zip">New</button>
+        </div>
+        <input class="search" id="fileSearch" type="search" placeholder="Filter files&hellip;" autocomplete="off" spellcheck="false">
+        <div class="tree" id="tree" role="tree" aria-label="Files in zip"></div>
+        <div class="pane-foot">
+          <label class="lbl" for="entrySel" style="margin:0 0 6px;display:block">Entry page</label>
+          <select class="mini-select" id="entrySel"></select>
+          <p class="hint">Assets are rewritten automatically. Click any file to inspect it.</p>
+        </div>
+      </div>
+      <div class="pane" id="srcPane" hidden>
+        <div class="pane-head">
+          <span class="lbl" id="srcPaneTitle">Rewritten HTML</span>
+          <button class="mini" id="srcCopy" type="button">Copy</button>
+        </div>
+        <p class="hint" style="margin:0;padding:0 15px 12px">This is the exact markup handed to the preview iframe &mdash; every asset path is already a blob URL.</p>
+        <pre class="src-view" id="srcDump"></pre>
+      </div>
+    </aside>
+
+    <!-- ─────────── centre: stage ─────────── -->
+    <section class="stage" id="stage">
+
+      <div class="stage-bar">
+        <div class="sb-group" role="group" aria-label="Resolution presets">
+          <span class="sb-label">Resolution</span>
+          <div class="chips" id="presetChips">
+            <button class="chip" type="button" data-w="1920" data-h="1080">1920&times;1080</button>
+            <button class="chip is-on" type="button" data-w="1440" data-h="900">1440&times;900</button>
+            <button class="chip" type="button" data-w="1280" data-h="720">1280&times;720</button>
+            <button class="chip" type="button" data-w="1024" data-h="768">1024&times;768</button>
+          </div>
+        </div>
+
+        <div class="sb-group" role="group" aria-label="Custom size">
+          <span class="sb-label">Custom</span>
+          <div class="num num-tight">
+            <input id="cw" type="number" min="240" max="3840" step="1" value="1440" aria-label="Custom width">
+            <span>&times;</span>
+            <input id="ch" type="number" min="240" max="2160" step="1" value="900" aria-label="Custom height">
+            <button class="mini" id="applyCustom" type="button">Apply</button>
+          </div>
+        </div>
+
+        <div class="sb-group" role="group" aria-label="Zoom">
+          <span class="sb-label">Zoom <b id="zoomVal">100%</b></span>
+          <input id="zoom" type="range" min="50" max="150" step="5" value="100" aria-label="Zoom">
+        </div>
+
+        <div class="sb-group sb-right">
+          <button class="btn" id="fitBtn" type="button" title="Fit the mockup to the window">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+            Fit
+          </button>
+          <button class="btn" id="reloadBtn" type="button" title="Re-render the page">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+            Refresh
+          </button>
+          <button class="btn" id="fsBtn" type="button" title="Fullscreen (F)">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/></svg>
+            Fullscreen
+          </button>
+        </div>
+      </div>
+
+      <div class="stage-scroll" id="stageScroll">
+        <div class="macbook" id="macbook">
+          <div class="mac-lid">
+            <span class="mac-notch" aria-hidden="true"></span>
+            <div class="mac-topbar" aria-hidden="true">
+              <i class="dot-r"></i><i class="dot-y"></i><i class="dot-g"></i>
+              <span class="mac-url" id="macUrl">about:blank</span>
+            </div>
+            <div class="mac-screen">
+              <div class="screen-fit" id="screenFit">
+                <div class="screen" id="screen">
+                  <iframe id="frame" title="Website preview"
+                          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-pointer-lock"
+                          referrerpolicy="no-referrer"></iframe>
+                </div>
+              </div>
+              <div class="rec-ring" aria-hidden="true"></div>
+            </div>
+          </div>
+          <div class="mac-base" aria-hidden="true"></div>
+          <div class="mac-glow" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <div class="stage-foot">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">Waiting for a zip&hellip;</span>
+        <span class="spacer"></span>
+        <span class="kv" id="fitReadout"></span>
+      </div>
+    </section>
+
+    <!-- ─────────── right: recorder ─────────── -->
+    <aside class="sidebar side-right" aria-label="Recorder">
+
+      <div class="rec-block">
+        <div class="rec-head">
+          <span class="lbl">Recorder</span>
+          <span class="rec-clock" id="recClock">00:00</span>
+        </div>
+
+        <button class="rec-btn" id="recBtn" type="button" disabled>
+          <span class="rec-dot" aria-hidden="true"></span>
+          <span id="recBtnLabel">Record Preview</span>
+        </button>
+        <p class="hint" id="recHint">Only the laptop screen is captured &mdash; never the sidebar or toolbar.</p>
+      </div>
+
+      <div class="rec-block">
+        <span class="lbl">Video settings</span>
+        <div class="field">
+          <span>Resolution</span>
+          <select id="capScale">
+            <option value="0.5">0.5&times; &mdash; fast</option>
+            <option value="0.75">0.75&times;</option>
+            <option value="1" selected>1&times; &mdash; native</option>
+          </select>
+        </div>
+        <div class="field">
+          <span>Frame rate</span>
+          <select id="capFps">
+            <option value="10">10 fps</option>
+            <option value="15">15 fps</option>
+            <option value="30" selected>30 fps</option>
+          </select>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="capFast">
+          <span>Fast render mode <em>(DOM&rarr;SVG, experimental)</em></span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="capMouse" checked>
+          <span>Show a cursor halo in the replay</span>
+        </label>
+      </div>
+
+      <div class="rec-block grow">
+        <div class="rec-head">
+          <span class="lbl">Result</span>
+          <span class="kv" id="recStats"></span>
+        </div>
+
+        <div class="result-empty" id="resultEmpty">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>
+          <p>No recording yet.<br>Hit <b>Record Preview</b> and interact with the page inside the MacBook.</p>
+        </div>
+
+        <div class="result" id="result" hidden>
+          <video id="outVideo" controls playsinline preload="metadata"></video>
+          <div class="result-actions">
+            <button class="btn btn-primary" id="dlVideo" type="button">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+              Download Video
+            </button>
+            <button class="btn" id="dlJson" type="button">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              Replay .json
+            </button>
+            <button class="btn" id="playReplay" type="button">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9z"/></svg>
+              Instant Replay
+            </button>
+            <button class="btn btn-danger" id="discardBtn" type="button">Discard</button>
+          </div>
+          <p class="hint">The <b>.webm</b> is a pixel capture. The <b>.json</b> is a full rrweb event stream &mdash; re-playable at any speed and lossless for text.</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<!-- ═══════════════════════════ footer (matches CodeMotion) ═══════════════════════════ -->
+<footer class="site-footer">
+  <div class="foot-grid">
+    <div>
+      <div class="foot-brand">CodeMotion</div>
+      <p>Desktop Mockup &amp; Recorder is a CodeMotion tool. Your zip is unzipped, rendered and recorded entirely inside this page &mdash; nothing is ever uploaded.</p>
+    </div>
+    <nav aria-label="Footer">
+      <h3>Pages</h3>
+      <ul>
+        <li><a href="https://rdjpublishers.com/">Home</a></li>
+        <li><a href="https://rdjpublishers.com/CodeMotion/">CodeMotion</a></li>
+        <li><a href="../">CodeMotion Tools</a></li>
+        <li><a href="https://rdjpublishers.com/about.html">About Page</a></li>
+        <li><a href="https://rdjpublishers.com/contact.html">Contact Page</a></li>
+        <li><a href="https://rdjpublishers.com/faq.html">FAQ</a></li>
+      </ul>
+    </nav>
+    <nav aria-label="Legal">
+      <h3>Legal</h3>
+      <ul>
+        <li><a href="https://rdjpublishers.com/privacy-policy.html">Privacy policy</a></li>
+        <li><a href="https://rdjpublishers.com/terms.html">Terms and condition</a></li>
+        <li><a href="https://rdjpublishers.com/disclaimer.html">Disclaimer</a></li>
+        <li><a href="https://rdjpublishers.com/sitemap.xml">Sitemap</a></li>
+      </ul>
+    </nav>
+  </div>
+  <p class="copy">&copy; <span id="year">2026</span> RDJ Publishers. All rights reserved.</p>
+</footer>
+
+<!-- ═══════════════════════════ source viewer modal ═══════════════════════════ -->
+<div class="modal" id="srcModal" hidden>
+  <div class="modal-back" data-close></div>
+  <div class="modal-box modal-wide" role="dialog" aria-modal="true" aria-labelledby="srcTitle">
+    <div class="modal-head">
+      <h3 id="srcTitle">File</h3>
+      <button class="icon-btn" type="button" data-close aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <img id="srcImage" alt="" hidden>
+      <pre id="srcText"><code></code></pre>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ instant replay modal ═══════════════════════════ -->
+<div class="modal" id="replayModal" hidden>
+  <div class="modal-back" data-close></div>
+  <div class="modal-box modal-replay" role="dialog" aria-modal="true" aria-labelledby="replayTitle">
+    <div class="modal-head">
+      <h3 id="replayTitle">Instant Replay</h3>
+      <button class="icon-btn" type="button" data-close aria-label="Close">&times;</button>
+    </div>
+    <div class="replay-stage" id="replayStage"></div>
+    <div class="replay-bar">
+      <button class="mini solid" id="rpPlay" type="button" aria-label="Play or pause">&#9654;</button>
+      <input id="rpSeek" type="range" min="0" max="1000" value="0" aria-label="Scrub">
+      <span class="kv" id="rpTime">0.0s / 0.0s</span>
+      <select class="mini-select" id="rpSpeed" aria-label="Playback speed">
+        <option value="0.5">0.5&times;</option>
+        <option value="1" selected>1&times;</option>
+        <option value="2">2&times;</option>
+        <option value="4">4&times;</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="libs/jszip.min.js"></script>
+<script src="libs/rrweb.min.js"></script>
+<script src="libs/html2canvas.min.js"></script>
+<script src="script.js"></script>
+</body>
+</html>

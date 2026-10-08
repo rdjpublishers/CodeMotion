@@ -68,9 +68,10 @@ a:hover { text-decoration: underline; }
   box-shadow: 0 0 18px rgba(189, 147, 249, .45);
 }
 .topnav { display: flex; gap: 26px; font-size: 14px; }
-.topnav a { color: var(--ink-2); }
+.topnav a { color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
 .topnav a:hover { color: var(--ink); text-decoration: none; }
 .topnav a.is-active { color: var(--ink); border-bottom: 1px solid var(--accent); padding-bottom: 2px; }
+.nav-ico { flex: none; }
 
 /* ─────────────── toolbar ─────────────── */
 .toolbar {

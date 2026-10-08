@@ -57,10 +57,37 @@ js/mp4.js           progressive MP4 muxer for WebCodecs output
 js/exporter.js      encode orchestration, progress, file naming, download
 js/examples.js      starter snippets
 js/app.js           state machine, controls, config save/load, history
+tools/              standalone sub-tools (see below)
 ```
 
 No build step, no bundler, no framework, no dependencies. Plain classic
 scripts, so it also runs from `file://`.
+
+---
+
+## Tools
+
+### Desktop Mockup & Recorder — `tools/desktop-mockup/`
+
+Drop a `.zip` of any static website into a MacBook mockup, interact with it, and
+record **only the laptop screen** as a video.
+
+- **Self-contained preview** — the zip is unzipped with JSZip, every file becomes
+  a blob URL, and `<link>`, `<script>`, `<img>`, `srcset`, `poster`, CSS `url()`,
+  `@import` chains and ES-module imports are all rewritten before the page reaches
+  the iframe. `/style.css`, `./assets/img.png` and `../css/app.css` all resolve.
+- **Real navigation** — clicking a link loads the next page *from the zip*, not
+  from the internet. Anything that tries to navigate off-origin is caught and the
+  page is restored.
+- **Two capture streams** — `html2canvas` → `canvas.captureStream()` →
+  `MediaRecorder` for the `.webm`, and `rrweb` for a lossless `.json` event log
+  that the Instant Replay player can scrub, pause and run at 0.5×–4×.
+- Resolution presets 1920×1080 / 1440×900 / 1280×720 / 1024×768 plus custom size,
+  a 50–150% zoom slider, fit-to-window and fullscreen.
+
+It reuses the CodeMotion tokens from `css/styles.css` verbatim, so it reads as
+part of the site. Also 100% static — see `tools/desktop-mockup/README.md` for the
+full notes, browser support and deployment.
 
 ---
 
