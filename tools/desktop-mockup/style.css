@@ -326,6 +326,17 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .rec-block > .lbl { display: block; margin-bottom: 10px; }
 .rec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; }
 .rec-clock { font-family: var(--mono); font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.capture-mode {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px; border-radius: 999px; margin-bottom: 10px;
+  border: 1px solid var(--line-2); color: var(--ink-3);
+  background: var(--panel-2);
+}
+.capture-mode::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.capture-mode.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+.capture-mode.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.capture-mode.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 
 .rec-btn {
   width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 10px;

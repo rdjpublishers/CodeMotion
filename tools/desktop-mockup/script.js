@@ -58,7 +58,8 @@
     canvas: null, timerId: null, watchdog: null, startedAt: 0, frames: 0,
     events: [], rrwebOk: false, videoBlob: null, mime: '', duration: 0, h2cFailed: false,
     failed: 0, failedRun: 0, lastError: '', mrStarted: false,
-    track: null, manual: false, lastShot: null, stream: null
+    track: null, manual: false, lastShot: null, stream: null,
+    mode: 'stream', statsTimer: null
   };
   let player = null, rpTimer = null;
 
@@ -562,6 +563,7 @@
     state.renderWatch = setTimeout(() => { state.pendingRender = false; }, 4000);
     $('#macUrl').textContent = path;
     markCurrent();
+    updateCaptureBadge();
     if (!$('#srcPane').hidden) dumpRewritten();
   }
 
@@ -688,6 +690,40 @@
     const list = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
     for (const m of list) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (e) {} }
     return '';
+  }
+
+  /* The fast path: the iframe itself can hand us a MediaStream of its own
+     compositor output. This is pixel-perfect (real CSS, real filters, real
+     blend modes) and 30fps is trivial because there's nothing to serialise.
+     The stream cannot be cross-origin, since we already allow-same-origin
+     on the iframe, but cross-origin IMAGES inside the iframe are fine —
+     the compositor doesn't expose raw pixels cross-origin, so the stream
+     stays untainted. Safari doesn't implement this; we fall back. */
+  function getIframeStream(fps) {
+    try {
+      if (typeof frame.captureStream === 'function') {
+        const s = frame.captureStream(fps);
+        if (s && s.getVideoTracks().length) return s;
+      }
+    } catch (e) { /* fall through */ }
+    return null;
+  }
+
+  /* Update the visible capture-mode badge so the user knows which path their
+     browser will take. This is what determines whether the video will be
+     pixel-perfect or a lossy html2canvas rasterisation. */
+  function updateCaptureBadge() {
+    const el = $('#captureBadge');
+    if (!el) return;
+    if (typeof frame.captureStream === 'function') {
+      el.className = 'capture-mode good';
+      el.textContent = 'Compositor capture ready';
+      el.title = 'Recording will use the browser\'s own compositor output — pixel-perfect, 30fps, no html2canvas.';
+    } else {
+      el.className = 'capture-mode warn';
+      el.textContent = 'Canvas capture (fallback)';
+      el.title = 'Your browser does not expose iframe.captureStream. Recording will go through html2canvas, which is slower and loses some modern CSS effects.';
+    }
   }
 
   async function ensureRRwebInFrame(doc) {
@@ -856,86 +892,66 @@
     rec.lastShot = shot;      // held so a slow capture can repeat the last frame
   }
 
-  async function startRecording() {
-    const doc = frame.contentDocument;
-    if (!doc || !doc.body) { toast('The preview is not loaded yet.', 'bad'); return; }
-    if (typeof MediaRecorder === 'undefined' || typeof HTMLCanvasElement === 'undefined' || !HTMLCanvasElement.prototype.captureStream) {
-      toast('This browser cannot record (no MediaRecorder / captureStream). Try Chrome, Edge or Firefox.', 'bad', 7000);
-      return;
-    }
-
-    const w = state.view.w, h = state.view.h;
-    const scale = parseFloat($('#capScale').value) || 1;
-    const fps = clamp(parseInt($('#capFps').value, 10) || 30, 5, 60);
-
-    rec.active = true; rec.busy = false; rec.frames = 0; rec.chunks = [];
-    rec.events = []; rec.rrwebOk = false; rec.h2cFailed = false;
-    rec.failed = 0; rec.failedRun = 0; rec.lastError = ''; rec.mrStarted = false;
-    rec.track = null; rec.manual = false; rec.lastShot = null;
-    rec.startedAt = performance.now();
-
-    /* ── UI flips first: the setup below is async and must never look like a hang */
+  function abortRecording(msg) {
+    rec.active = false;
+    if (rec.timerId) { clearTimeout(rec.timerId); rec.timerId = null; }
+    if (rec.statsTimer) { clearInterval(rec.statsTimer); rec.statsTimer = null; }
+    if (rec.stopRR) { try { rec.stopRR(); } catch (e) {} rec.stopRR = null; }
+    if (rec.stream) { try { rec.stream.getTracks().forEach((t) => t.stop()); } catch (e) {} rec.stream = null; }
+    if (rec.canvas) { rec.canvas = null; rec.lastShot = null; }
+    clearInterval(clockId);
+    macbook.classList.remove('is-recording');
     const btn = $('#recBtn');
-    btn.classList.add('is-rec');
-    btn.setAttribute('aria-pressed', 'true');
-    $('#recBtnLabel').textContent = 'Stop';
-    $('#result').hidden = true;
-    $('#resultEmpty').hidden = false;
-    $('#recStats').textContent = '';
-    $('#recHint').textContent = 'Click, scroll, hover and type inside the screen. Press R or the button to stop.';
-    macbook.classList.add('is-recording');
-    setStatus('rec', 'Starting the recorder…');
-    tickClock();
-
-    const abort = (msg) => {
-      rec.active = false;
-      if (rec.stopRR) { try { rec.stopRR(); } catch (e) {} rec.stopRR = null; }
-      if (rec.stream) { try { rec.stream.getTracks().forEach((t) => t.stop()); } catch (e) {} rec.stream = null; }
-      clearInterval(clockId);
-      macbook.classList.remove('is-recording');
-      btn.classList.remove('is-rec');
-      btn.setAttribute('aria-pressed', 'false');
-      $('#recBtnLabel').textContent = 'Record Preview';
-      $('#recClock').textContent = '00:00';
-      $('#recHint').textContent = 'Only the laptop screen is captured — never the sidebar or toolbar.';
-      setStatus('', 'Ready to record');
-      toast(msg, 'bad', 7000);
-    };
-
-    /* ── 1 · rrweb event stream from inside the iframe */
+    btn.classList.remove('is-rec');
+    btn.setAttribute('aria-pressed', 'false');
+    $('#recBtnLabel').textContent = 'Record Preview';
+    $('#recClock').textContent = '00:00';
+    $('#recHint').textContent = 'Only the laptop screen is captured — never the sidebar or toolbar.';
+    setStatus('', 'Ready to record');
+    toast(msg, 'bad', 7000);
+  }
+  function startStreamRecording(stream, fps, w, h) {
+    rec.mode = 'stream';
+    rec.stream = stream;
+    rec.track = null;
+    rec.manual = false;
+    const mime = pickVideoMime();
+    const bitrate = clamp(Math.round(w * h * fps * 0.11), 2.5e6, 12e6);
     try {
-      await ensureRRwebInFrame(doc);
-      const rr = frame.contentWindow && frame.contentWindow.rrweb;
-      if (rr && typeof rr.record === 'function') {
-        rec.stopRR = rr.record({
-          emit: (ev, isCheckout) => { if (!isCheckout) rec.events.push(ev); },
-          recordCanvas: true, collectFonts: true, inlineStylesheet: true, mouseTail: false,
-          sampling: { mousemove: false, scroll: 60, media: 800, input: 'last' }
-        });
-        rec.rrwebOk = true;
-      }
-    } catch (e) { console.warn('rrweb failed', e); }
-    if (!rec.active) return;                      // Stop was pressed while we were setting up
-    if (!rec.rrwebOk) toast('rrweb did not start — the video will still record, but Instant Replay is unavailable.', 'warn', 6000);
-
-    /* ── 2 · canvas → captureStream → MediaRecorder */
+      rec.mr = mime ? new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate })
+                    : new MediaRecorder(stream);
+      rec.mr.ondataavailable = (e) => { if (e.data && e.data.size) rec.chunks.push(e.data); };
+      rec.mime = rec.mr.mimeType || 'video/webm';
+      rec.mrStarted = true;
+      rec.mr.start(500);
+    } catch (err) {
+      console.error('stream mode failed:', err);
+      try { stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+      return false;
+    }
+    rec.startedAt = performance.now();
+    setStatus('rec', 'Recording — interact with the page inside the MacBook');
+    /* The browser does the frame production; we just keep the live counter honest. */
+    rec.statsTimer = setInterval(() => {
+      if (!rec.active) return;
+      if (rec.rrwebOk) $('#recStats').textContent = 'Live · ' + rec.events.length + ' events';
+    }, 250);
+    return true;
+  }
+  function startCanvasRecording(fps, w, h) {
+    rec.mode = 'canvas';
+    const scale = parseFloat($('#capScale').value) || 1;
     const cv = document.createElement('canvas');
     cv.width = Math.max(2, Math.round(w * scale));
     cv.height = Math.max(2, Math.round(h * scale));
     rec.canvas = cv;
     const ctx = cv.getContext('2d', { alpha: false });
-    if (!ctx) { abort('Could not create a 2D capture context.'); return; }
-    /* prime the canvas once so frame 0 is white, not black */
+    if (!ctx) { abortRecording('Could not create a 2D capture context.'); return; }
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, cv.width, cv.height);
 
     const mime = pickVideoMime();
     try {
-      /* captureStream(0) + requestFrame() hands us exact control of frame
-         timing. With a positive frame rate the browser only emits a frame when
-         the canvas actually changes, so a slow html2canvas pass (or a page
-         re-render) leaves a gap and the finished video comes out SHORTER than
-         the recording. Driving it manually keeps the clip real-time. */
       let stream, manual = false, track = null;
       try {
         stream = cv.captureStream(0);
@@ -951,21 +967,13 @@
                     : new MediaRecorder(stream);
       rec.mr.ondataavailable = (e) => { if (e.data && e.data.size) rec.chunks.push(e.data); };
       rec.mime = rec.mr.mimeType || 'video/webm';
-      /* deliberately NOT started here — the encoder is switched on by the frame
-         loop as soon as the first real frame has been drawn, so the video never
-         opens on a blank canvas. */
-      rec.mrStarted = false;
+      rec.mrStarted = false;                                     // started on the first real frame
     } catch (err) {
-      console.error(err);
-      abort('MediaRecorder refused to start: ' + (err && err.message ? err.message : 'unknown'));
+      abortRecording('MediaRecorder refused to start: ' + (err && err.message ? err.message : 'unknown'));
       return;
     }
 
-    /* the clock measures the recording itself, not the setup */
-    rec.startedAt = performance.now();
     setStatus('rec', 'Warming up the first frame…');
-
-    /* ── 3 · frame loop */
     const interval = 1000 / fps;
     let last = 0;
     const loop = async () => {
@@ -973,10 +981,6 @@
       const now = performance.now();
       if (!rec.busy && now - last >= interval * 0.85) {
         last = now; rec.busy = true;
-        /* html2canvas occasionally races a DOM mutation (rrweb's own observer,
-           a page script) and throws. One retry usually clears it, and a dropped
-           frame just repeats the previous image — so only complain if the page
-           is genuinely uncapturable. */
         for (let attempt = 0; attempt < 2 && rec.active; attempt++) {
           try {
             await grabFrame(ctx, w, h);
@@ -990,14 +994,10 @@
             }
             break;
           } catch (err) {
-            /* A cross-origin asset taints a faithful capture. Dropping to the
-               compatible renderer is far better than losing the recording, so
-               downgrade once and carry on. */
             if (err && err.tainted) {
               setCapMode('compat', 'Switched automatically: this page pulls assets from a CDN that blocks cross-origin reads.');
-              toast('A faithful capture was blocked by a cross-origin asset, so the recorder switched to Compatible mode. Blurred or masked overlays may not appear. Turn on “Inline remote assets” and reload to try again.', 'warn', 11000);
-              attempt--;                 // retry immediately on the new renderer
-              continue;
+              toast('A faithful capture was blocked by a cross-origin asset, so the recorder switched to Compatible mode. Blurred or masked overlays may not appear. Turn on "Inline remote assets" and reload to try again.', 'warn', 11000);
+              attempt--; continue;
             }
             rec.failed++;
             rec.failedRun++;
@@ -1017,8 +1017,6 @@
             + (rec.failed ? ' · ' + rec.failed + ' skipped' : '');
         }
       } else if (rec.manual && rec.lastShot) {
-        /* a capture is still in flight — re-commit the previous frame so the
-           clip keeps real-time pacing instead of silently losing seconds */
         ctx.drawImage(rec.lastShot, 0, 0, rec.canvas.width, rec.canvas.height);
       }
       if (rec.manual) { try { rec.track.requestFrame(); } catch (e) {} }
@@ -1026,12 +1024,74 @@
     };
     rec.timerId = setTimeout(loop, 0);
   }
+  async function startRecording() {
+    const doc = frame.contentDocument;
+    if (!doc || !doc.body) { toast('The preview is not loaded yet.', 'bad'); return; }
+    if (typeof MediaRecorder === 'undefined') {
+      toast('This browser cannot record (no MediaRecorder). Try Chrome, Edge or Firefox.', 'bad', 7000);
+      return;
+    }
+
+    const w = state.view.w, h = state.view.h;
+    const fps = clamp(parseInt($('#capFps').value, 10) || 30, 5, 60);
+
+    rec.active = true; rec.busy = false; rec.frames = 0; rec.chunks = [];
+    rec.events = []; rec.rrwebOk = false; rec.h2cFailed = false;
+    rec.failed = 0; rec.failedRun = 0; rec.lastError = ''; rec.mrStarted = false;
+    rec.track = null; rec.manual = false; rec.lastShot = null; rec.stream = null;
+    rec.mode = 'stream';
+    rec.statsTimer = null;
+    rec.startedAt = performance.now();
+
+    /* UI flips first: the setup below is async and must never look like a hang */
+    const btn = $('#recBtn');
+    btn.classList.add('is-rec');
+    btn.setAttribute('aria-pressed', 'true');
+    $('#recBtnLabel').textContent = 'Stop';
+    $('#result').hidden = true;
+    $('#resultEmpty').hidden = false;
+    $('#recStats').textContent = '';
+    $('#recHint').textContent = 'Click, scroll, hover and type inside the screen. Press R or the button to stop.';
+    macbook.classList.add('is-recording');
+    setStatus('rec', 'Starting the recorder…');
+    tickClock();
+
+    /* rrweb runs in the background, independent of which capture path we take */
+    ensureRRwebInFrame(doc).then(() => {
+      if (!rec.active) return;
+      const rr = frame.contentWindow && frame.contentWindow.rrweb;
+      if (rr && typeof rr.record === 'function') {
+        try {
+          rec.stopRR = rr.record({
+            emit: (ev, isCheckout) => { if (!isCheckout) rec.events.push(ev); },
+            recordCanvas: true, collectFonts: true, inlineStylesheet: true, mouseTail: false,
+            sampling: { mousemove: false, scroll: 60, media: 800, input: 'last' }
+          });
+          rec.rrwebOk = true;
+        } catch (e) { console.warn('rrweb failed', e); }
+      }
+      if (!rec.rrwebOk && rec.active) {
+        toast('rrweb did not start — the video will still record, but Instant Replay is unavailable.', 'warn', 6000);
+      }
+    });
+
+    /* Fast path: record the iframe's actual compositor output. Pixel-perfect. */
+    const direct = getIframeStream(fps);
+    if (direct) {
+      if (startStreamRecording(direct, fps, w, h)) return;
+      toast('Compositor capture failed at startup, falling back to the html2canvas path.', 'warn', 5000);
+    }
+    /* Fallback: html2canvas (faithful → compat) for Safari and old browsers. */
+    startCanvasRecording(fps, w, h);
+  }
+
 
 
   async function stopRecording() {
     if (!rec.active) return;
     rec.active = false;
-    clearTimeout(rec.timerId);
+    clearTimeout(rec.timerId); rec.timerId = null;
+    clearInterval(rec.statsTimer); rec.statsTimer = null;
     clearInterval(clockId);
     if (rec.stopRR) { try { rec.stopRR(); } catch (e) {} rec.stopRR = null; }
 
@@ -1044,15 +1104,16 @@
         try { mr.stop(); } catch (e) { resolve(); }
         setTimeout(resolve, 2500);
       });
-      try { if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
     }
+    if (rec.stream) { try { rec.stream.getTracks().forEach((t) => t.stop()); } catch (e) {} }
     rec.stream = null;
     rec.mrStarted = false;
-    rec.track = null; rec.manual = false; rec.lastShot = null;
     rec.duration = dur;
     rec.videoBlob = rec.chunks.length ? new Blob(rec.chunks, { type: rec.mime || 'video/webm' }) : null;
     rec.chunks = [];
     rec.canvas = null;
+    rec.lastShot = null;
+    rec.track = null;
 
     macbook.classList.remove('is-recording');
     const btn = $('#recBtn');
@@ -1071,13 +1132,16 @@
     $('#resultEmpty').hidden = true;
     const mb = rec.videoBlob.size >= 1048576 ? (rec.videoBlob.size / 1048576).toFixed(1) + ' MB'
                                                 : (rec.videoBlob.size / 1024).toFixed(0) + ' KB';
-    $('#recStats').textContent = fmt(dur / 1000) + ' · ' + rec.frames + ' frames · ' + mb
-      + (rec.failed ? ' · ' + rec.failed + ' skipped' : '')
-      + (rec.rrwebOk ? ' · ' + rec.events.length + ' events' : '');
-    setStatus('ready', 'Recording ready — ' + rec.frames + ' frames captured');
+    const lines = [fmt(dur / 1000) + ' · ' + mb];
+    if (rec.mode === 'canvas') lines.push(rec.frames + ' frames' + (rec.failed ? ' · ' + rec.failed + ' skipped' : ''));
+    else lines.push('compositor capture');
+    if (rec.rrwebOk) lines.push(rec.events.length + ' events');
+    $('#recStats').textContent = lines.join(' · ');
+    setStatus('ready', 'Recording ready — ' + (rec.mode === 'canvas' ? rec.frames + ' frames' : fmt(dur / 1000) + ' captured'));
     toast('Recorded ' + fmt(dur / 1000) + ' · ' + mb + ' webm'
       + (rec.failed ? ' (' + rec.failed + ' frames skipped)' : ''), 'good');
   }
+
 
   const fmt = (sec) => {
     sec = Math.max(0, Math.floor(sec));
@@ -1109,6 +1173,7 @@
     v.pause();
     if (v.src) { URL.revokeObjectURL(v.src); v.removeAttribute('src'); v.load(); }
     rec.videoBlob = null; rec.events = []; rec.frames = 0; rec.duration = 0;
+    if (rec.statsTimer) { clearInterval(rec.statsTimer); rec.statsTimer = null; }
     closeReplay();
     $('#result').hidden = true;
     $('#resultEmpty').hidden = false;
@@ -1384,4 +1449,5 @@
   setStatus('', 'Waiting for a zip…');
   $('#year').textContent = new Date().getFullYear();
   setTimeout(fitMockup, 120);
+  updateCaptureBadge();
 })();

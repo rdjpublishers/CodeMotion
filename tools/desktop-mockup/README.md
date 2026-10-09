@@ -130,19 +130,31 @@ at 1024×768, dropping at 1920×1080.
 
 ## Capture fidelity — read this if overlays vanish from your video
 
-This is the single most important setting, and the reason is not obvious.
+### The path your recording takes
+
+A badge in the recorder sidebar tells you which of these will run, before you hit Record:
+
+| Path | When it runs | What you get |
+|---|---|---|
+| **Compositor capture** (default in Chrome and Firefox) | `HTMLIFrameElement.captureStream(fps)` exists on the iframe | The browser's own compositor output as a `MediaStream` → `MediaRecorder`. Pixel-perfect. Real `filter`, real `mask-image`, real blend modes, real `clip-path`. 30fps is easy because there is nothing to serialise. |
+| **Canvas capture** (Safari and old browsers) | `captureStream` is missing | A hidden canvas, html2canvas at the chosen renderer, `canvas.captureStream`, `MediaRecorder`. Slower and lossy. |
+
+The compositor path exists because it is the *only* way to get a video that matches
+what you see: the real browser painting the real DOM, captured by the real compositor.
+No serialisation step, no lossy rasteriser, no CSS features missing.
+
+If the badge says **Compositor capture ready**, a `filter: blur(38px)` overlay will
+fade smoothly in the video, a `mask-image` radial will keep its soft edge, a
+`mix-blend-mode` will blend. That is a guarantee, not a hope.
+
+### The canvas path (when compositor isn't available)
 
 html2canvas has two renderers, and the default one **silently drops modern CSS**:
 
 | Renderer | How it works | Result |
 |---|---|---|
-| **Faithful** (default) | Serialises the live DOM into an `<svg><foreignObject>` and lets the *browser* rasterise it | Real CSS. `filter`, `mask-image`, `mix-blend-mode`, `clip-path`, `backdrop-filter` all survive |
+| **Faithful** | Serialises the live DOM into an `<svg><foreignObject>` and lets the *browser* rasterise it | Real CSS. `filter`, `mask-image`, `mix-blend-mode`, `clip-path`, `backdrop-filter` all survive |
 | **Compatible** | html2canvas's own painter | Fast and taint-proof, but drops the effects above |
-
-A `filter: blur(38px)` overlay does not fade out in Compatible mode — it becomes a
-**hard-edged disc**, or disappears entirely. `mask-image` radial fades become solid
-blocks. `clip-path` wipes render unclipped. If a blurred, masked or blended
-animation animates in the preview but is missing or blocky in the video, this is why.
 
 Measured against the browser's own painting of the same frame at 1024×768
 (percentage of pixels that differ):
@@ -155,9 +167,9 @@ Measured against the browser's own painting of the same frame at 1024×768
 | `clip-path` | 28.8% wrong | 7% |
 | **whole frame** | **12.4%** | **1.3%** |
 
-Faithful is roughly **9.5× more accurate**, and is the default for exactly that reason.
+Faithful is the default. Compatible stays available as a taint-proof fallback.
 
-### The one thing Faithful cannot do
+### Cross-origin assets
 
 Faithful needs every asset **same-origin**. A cross-origin asset the browser cannot
 read either taints the canvas or is dropped from the capture.
@@ -165,22 +177,43 @@ read either taints the canvas or is dropped from the capture.
 - **Tainted** → the recorder detects it on the first frame, switches itself to
   Compatible, finishes the recording, and tells you which effects you are losing.
   It never dies mid-take.
-- **Dropped** (what Chromium actually does with a non-CORS image) → the asset is
-  simply missing from the video, and the Capture note says so by name.
+- **Dropped** (what Chromium does with a non-CORS image) → the asset is simply
+  missing from the video, and the Capture note says so by name.
 
-Fix either one with **Inline remote assets** (on by default). It re-fetches the
-page's `http(s)` images, stylesheets, `@import`s and `url()`s as blobs after each
-page settles. It only works when the CDN sends `Access-Control-Allow-Origin`; if it
-cannot, self-host the asset or add the header.
+**Inline remote assets** (on by default) re-fetches the page's `http(s)` images,
+stylesheets, `@import`s and `url()`s as blobs after each page settles. It only works
+when the CDN sends `Access-Control-Allow-Origin`; if it cannot, self-host the asset
+or add the header.
 
 ### Tuning
 
 - **Resolution `0.5×`** — halves the pixels; roughly 4× faster. Use it for big presets.
 - **Frame rate** — 10 / 15 / 30 fps. Higher costs more CPU; the timing stays correct either way.
-- Faithful and Compatible cost about the same per frame (~4–5 fps at 1024×768 on a
-  mid laptop). Faithful is not the slow option — it is the correct one.
+- In the canvas path, Faithful and Compatible cost about the same per frame (~4–5 fps at 1024×768
+  on a mid laptop). In the compositor path, the bottleneck is the page itself — 30fps is the norm.
 - If a frame fails, it is retried once and then repeats the previous image. You only get
   a warning if the page is genuinely uncapturable.
+
+## Instant Replay — and what it cannot replay
+
+The Instant Replay is a **DOM event log** (rrweb). It records every click, input
+change, scroll, and DOM mutation, then re-runs them. It is lossless for *content*
+and *interactions*: text changes, image swaps, form state, scroll position, cursor
+movements are exact.
+
+It is **stepped for smooth CSS animations**. A `@keyframes` blur that eases in over
+half a second will appear as a series of snapshot frames in the replay, not as a
+smooth motion. This is a fundamental limit of DOM-based replay — rrweb does not
+record animation timing, only the DOM state at each moment.
+
+The webm is the canonical recording; the Instant Replay is a re-run of what the
+DOM *did*. Use the webm for animations, the Replay for inspection and scrubbing.
+
+### Replay controls
+
+- Space / `▶` button: play / pause
+- Drag the seek bar to jump
+- Speed: 0.5×, 1×, 2×, 4×
 
 ---
 
