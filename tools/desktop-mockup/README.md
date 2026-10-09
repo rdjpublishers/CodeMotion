@@ -235,6 +235,28 @@ page before it ever reaches the iframe:
   traps clicks and form submits so navigation always comes back to the parent
 - If the page ever tries to navigate off-origin, the `load` handler restores the zip page
 
+### What the bridge also rewrites (so runtime-painted canvases work)
+
+HTML attributes are only the *first* place a page asks for a resource. A page can
+also do `new Image(); img.src = 'img/foo.webp'` at runtime, or call `fetch('data.json')`,
+or spawn `new Worker('worker.js')`. A srcdoc iframe resolves those relative paths
+against the **parent** page's URL — so `'img/foo.webp'` becomes
+`https://your-site/CodeMotion/tools/desktop-mockup/img/foo.webp` and 404s, even
+though the file is right there in the zip.
+
+The bridge ships the zip's full `path → blob URL` map into the iframe (with the
+parent's path prefix stripped) and patches every runtime entry point:
+
+- `src` / `srcset` / `href` setters on `<img>`, `<source>`, `<video>`, `<audio>`,
+  `<track>`, `<script>`, `<link>`, `<a>`, `<embed>`, `<iframe>`, `<object>`,
+  `<input type=image>`, `<svg:use>`, `<svg:image>`
+- `window.fetch` and `XMLHttpRequest.prototype.open`
+- `new Worker(url)` and `new EventSource(url)`
+
+So a page that paints a canvas from a `new Image()` whose `src` is set in JavaScript
+now loads it from the zip, and a runtime-painted reveal / hydration / animation
+behaves the same in the preview as it does in production.
+
 The **Rewritten HTML** tab in the left sidebar shows the exact markup the iframe receives — handy
 when a path does not resolve.
 

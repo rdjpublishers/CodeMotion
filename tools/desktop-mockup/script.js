@@ -187,64 +187,168 @@
     return code;
   }
 
-  /* ═══════════════════════════ bridge (runs inside the preview) ═══════════════════════════ */
-  const BRIDGE = '(' + function () {
-    var P = window.parent;
-    function post(type, data) {
-      try { data = data || {}; data.__cm = 1; data.type = type; P.postMessage(data, '*'); } catch (e) {}
-    }
-    function elFrom(e) { var n = e.target; while (n && n.nodeType !== 1) n = n.parentNode; return n; }
-    function closestA(n) { while (n && n.nodeType === 1) { if (n.tagName === 'A' || n.tagName === 'AREA') return n; n = n.parentNode; } return null; }
-    window.__cm = { post: post, at: Date.now() };
+  /* ═══════════════════════════ bridge (runs inside the preview) ═══════════════════════════
+     The bridge is rebuilt fresh for every page render, with the current zip's
+     path -> blob-URL map baked in. It rewrites EVERY URL the page tries to load —
+     not just HTML attributes (which processPage handles), but also JS-set
+     `img.src = '...'`, `fetch('...')`, `new Worker('...')`, and so on. Without
+     this, a page that does `new Image(); img.src = 'img/night.webp'` at runtime
+     fetches the relative path against the PARENT page's URL, 404s, and any
+     runtime-painted canvas stays blank. */
+  function buildBridge() {
+    var map = Object.create(null);
+    state.files.forEach(function (f, p) { map[p] = f.url; });
+    var mapJson = JSON.stringify(map);
+    /* The iframe is srcdoc, so its document.baseURI borrows the parent's URL
+       (e.g. /CodeMotion/tools/desktop-mockup/index.html). When the page's JS does
+       new URL('img/foo', baseURI) it ends up with that full parent prefix;
+       strip the parent's directory so the lookup matches our zip-relative keys. */
+    var baseDir = location.pathname.replace(/[^/]*$/, '');
+    var baseDirJson = JSON.stringify(baseDir);
 
-    try {
-      ['pushState', 'replaceState'].forEach(function (fn) {
-        var orig = history[fn];
-        if (!orig) return;
-        history[fn] = function () {
-          var r = orig.apply(this, arguments);
-          post('route', { href: location.pathname + location.search + location.hash });
-          return r;
-        };
-      });
-    } catch (e) {}
-
-    document.addEventListener('click', function (e) {
-      var a = closestA(elFrom(e));
-      if (!a) return;
-      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button && e.button !== 0)) return;
-      var p = a.getAttribute('data-cm-path');
-      var h = p || a.getAttribute('href');
-      if (!h) return;
-      if (h.charAt(0) === '#' && h.indexOf('#__cm:') !== 0) return;   // in-page anchor
-      e.preventDefault();
-      post('route', { href: h });
-    }, true);
-
-    document.addEventListener('submit', function (e) {
-      e.preventDefault();
-      post('route', { href: e.target.getAttribute('data-cm-form') || '' });
-    }, true);
-
-    function hi() { post('ready', { title: document.title, url: location.href, scroll: [window.pageXOffset, window.pageYOffset] }); }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hi); else hi();
-    window.addEventListener('load', function () { post('loaded', { title: document.title }); });
-
-    /* html2canvas's foreignObject renderer can null-deref its own clone iframe
-       while tearing it down. The capture still completes correctly — the
-       console just spams. Swallow exactly that and count it, so anything else
-       still surfaces. */
-    window.__cmIgnored = 0;
-    window.addEventListener('error', function (e) {
-      var m = String((e && e.message) || '');
-      if (m.indexOf('scrollLeft') > -1 && m.indexOf('null') > -1) {
-        e.preventDefault(); e.stopPropagation();
-        window.__cmIgnored++;
-        return;
+    return '(' + function () {
+      var P = window.parent;
+      var CM = /*__CM__*/ null;
+      var CM_BASE = /*__CM_BASE__*/ null;
+      function post(type, data) {
+        try { data = data || {}; data.__cm = 1; data.type = type; P.postMessage(data, '*'); } catch (e) {}
       }
-      post('error', { message: m });
-    });
-  } + ')();';
+      function elFrom(e) { var n = e.target; while (n && n.nodeType !== 1) n = n.parentNode; return n; }
+      function closestA(n) { while (n && n.nodeType === 1) { if (n.tagName === 'A' || n.tagName === 'AREA') return n; n = n.parentNode; } return null; }
+
+      /* Relative paths in a sandboxed srcdoc iframe resolve against the
+         parent page's URL, so the browser asks the wrong origin and 404s.
+         Resolve them against the zip's own path map instead. */
+      var ABS = /^(?:[a-z][a-z0-9+.\-]*:|\/\/)/i;
+      function resolveUrl(url) {
+        if (url == null || typeof url !== 'string') return url;
+        if (ABS.test(url)) return url;                       // absolute, data:, blob:, mailto:, …
+        var abs;
+        try { abs = new URL(url, document.baseURI || location.href).href; } catch (e) { return url; }
+        var p = abs.replace(/^[a-z]+:\/\/[^/]+/i, '');
+        if (CM_BASE && p.indexOf(CM_BASE) === 0) p = p.slice(CM_BASE.length);
+        p = p.replace(/^\/+/, '');
+        return CM[p] || CM[p.replace(/^index\.html\/?/, '')] || (CM['index.html/' + p] || url);
+      }
+      function resolveSrcset(value) {
+        if (!value || value.indexOf('data:') === 0) return value;
+        return value.split(',').map(function (part) {
+          var bits = part.trim().split(/\s+/);
+          if (bits[0]) bits[0] = resolveUrl(bits[0]);
+          return bits.join(' ');
+        }).join(', ');
+      }
+
+      /* Patch every DOM-attribute setter that loads a resource. */
+      function patch(Proto, attr, transform) {
+        try {
+          var d = Object.getOwnPropertyDescriptor(Proto, attr);
+          if (!d || !d.set || !d.configurable) return;
+          Object.defineProperty(Proto, attr, {
+            get: d.get, configurable: true, enumerable: d.enumerable,
+            set: function (v) { d.set.call(this, transform ? transform(v) : resolveUrl(v)); }
+          });
+        } catch (e) {}
+      }
+      patch(HTMLImageElement.prototype, 'src');
+      patch(HTMLImageElement.prototype, 'srcset', resolveSrcset);
+      patch(HTMLSourceElement.prototype, 'src');
+      patch(HTMLSourceElement.prototype, 'srcset', resolveSrcset);
+      patch(HTMLMediaElement.prototype, 'src');
+      patch(HTMLMediaElement.prototype, 'poster');
+      patch(HTMLTrackElement.prototype, 'src');
+      patch(HTMLScriptElement.prototype, 'src');
+      patch(HTMLLinkElement.prototype, 'href');
+      patch(HTMLAnchorElement.prototype, 'href');
+      patch(HTMLEmbedElement.prototype, 'src');
+      patch(HTMLIFrameElement.prototype, 'src');
+      patch(HTMLObjectElement.prototype, 'data');
+      patch(HTMLInputElement.prototype, 'src');
+      if (typeof SVGUseElement !== 'undefined') { patch(SVGUseElement.prototype, 'href'); patch(SVGUseElement.prototype, 'xlink:href'); }
+      if (typeof SVGImageElement !== 'undefined') patch(SVGImageElement.prototype, 'href');
+
+      /* fetch / XHR / Worker / EventSource */
+      try {
+        var origFetch = window.fetch;
+        window.fetch = function (input, init) {
+          if (typeof input === 'string') return origFetch.call(this, resolveUrl(input), init);
+          if (input && typeof input === 'object' && 'url' in input) {
+            var r = resolveUrl(input.url);
+            if (r !== input.url) { try { input = new Request(r, input); } catch (e) {} }
+          }
+          return origFetch.call(this, input, init);
+        };
+      } catch (e) {}
+      try {
+        var origOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (method, url) {
+          return origOpen.apply(this, [method, resolveUrl(url)].concat([].slice.call(arguments, 2)));
+        };
+      } catch (e) {}
+      try {
+        var OrigWorker = window.Worker;
+        if (OrigWorker) {
+          window.Worker = function (url, opts) { return new OrigWorker(resolveUrl(url), opts); };
+        }
+        var OrigES = window.EventSource;
+        if (OrigES) {
+          window.EventSource = function (url, opts) { return new OrigES(resolveUrl(url), opts); };
+        }
+      } catch (e) {}
+
+      /* Navigation patches (existing behaviour). */
+      try {
+        ['pushState', 'replaceState'].forEach(function (fn) {
+          var orig = history[fn];
+          if (!orig) return;
+          history[fn] = function () {
+            var r = orig.apply(this, arguments);
+            post('route', { href: location.pathname + location.search + location.hash });
+            return r;
+          };
+        });
+      } catch (e) {}
+
+      document.addEventListener('click', function (e) {
+        var a = closestA(elFrom(e));
+        if (!a) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button && e.button !== 0)) return;
+        var p = a.getAttribute('data-cm-path');
+        var h = p || a.getAttribute('href');
+        if (!h) return;
+        if (h.charAt(0) === '#' && h.indexOf('#__cm:') !== 0) return;
+        e.preventDefault();
+        post('route', { href: h });
+      }, true);
+
+      document.addEventListener('submit', function (e) {
+        e.preventDefault();
+        post('route', { href: e.target.getAttribute('data-cm-form') || '' });
+      }, true);
+
+      window.__cm = { post: post, at: Date.now(), resolve: resolveUrl };
+      window.__cmMap = CM;
+
+      function hi() { post('ready', { title: document.title, url: location.href, scroll: [window.pageXOffset, window.pageYOffset] }); }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hi); else hi();
+      window.addEventListener('load', function () { post('loaded', { title: document.title }); });
+
+      /* html2canvas's foreignObject renderer can null-deref its own clone iframe
+         while tearing it down. The capture still completes correctly — the
+         console just spams. Swallow exactly that and count it. */
+      window.__cmIgnored = 0;
+      window.addEventListener('error', function (e) {
+        var m = String((e && e.message) || '');
+        if (m.indexOf('scrollLeft') > -1 && m.indexOf('null') > -1) {
+          e.preventDefault(); e.stopPropagation();
+          window.__cmIgnored++;
+          return;
+        }
+        post('error', { message: m });
+      });
+    }.toString().replace('/*__CM__*/ null', mapJson).replace('/*__CM_BASE__*/ null', baseDirJson) + ')()';
+  }
+
 
   /* ═══════════════════════════ HTML rewriting ═══════════════════════════ */
   const ASSET_ATTRS = [
@@ -338,7 +442,7 @@
     const head = doc.head || doc.documentElement;
     const b = doc.createElement('script');
     b.setAttribute('data-cm-bridge', '1');
-    b.textContent = BRIDGE;
+    b.textContent = buildBridge();
     head.insertBefore(b, head.firstChild);
 
     return '<!DOCTYPE html>\n<!-- CodeMotion Desktop Mockup · ' + state.file.name + ' · ' + path + ' -->\n' + doc.documentElement.outerHTML;
