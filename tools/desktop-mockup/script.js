@@ -1020,7 +1020,9 @@
     rec.track = null;
     rec.manual = false;
     const mime = pickVideoMime();
-    const bitrate = clamp(Math.round(w * h * fps * 0.11), 2.5e6, 12e6);
+    /* Tuned lighter for slow devices: 0.07 bpp is plenty for the preview
+       and gives the encoder enough headroom to keep up with the compositor. */
+    const bitrate = clamp(Math.round(w * h * fps * 0.07), 1.5e6, 10e6);
     try {
       rec.mr = mime ? new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate })
                     : new MediaRecorder(stream);
@@ -1040,6 +1042,23 @@
       if (!rec.active) return;
       if (rec.rrwebOk) $('#recStats').textContent = 'Live · ' + rec.events.length + ' events';
     }, 250);
+    /* Pre-flight: if the compositor is overloaded and no chunks have arrived
+       by 3 s, warn the user and queue a graceful canvas-fallback restart at
+       5 s if they haven't stopped. The fallback drops the heavy first path
+       and switches to html2canvas for the rest of the session. */
+    rec.preflightTimer = setTimeout(() => {
+      if (!rec.active || rec.chunks.length > 0) return;
+      setStatus('rec', 'Still waiting for the first frame — the page may be heavy. Try 0.5× or 10 fps.');
+      toast('The browser\'s compositor is slow. Lower the resolution or switch on "Force canvas capture" to keep recording.', 'warn', 6000);
+    }, 3000);
+    rec.fallbackTimer = setTimeout(() => {
+      if (!rec.active || rec.chunks.length > 0) return;
+      try { stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+      try { rec.mr && rec.mr.stop(); } catch (e) {}
+      rec.stream = null; rec.mr = null; rec.mrStarted = false; rec.chunks = [];
+      setStatus('rec', 'Switched to the canvas path — keep going.');
+      startCanvasRecording(fps, w, h);
+    }, 5000);
     return true;
   }
   function startCanvasRecording(fps, w, h) {
@@ -1066,7 +1085,7 @@
       rec.stream = stream;
       rec.track = track;
       rec.manual = manual;
-      const bitrate = clamp(Math.round(cv.width * cv.height * fps * 0.11), 2.5e6, 12e6);
+      const bitrate = clamp(Math.round(cv.width * cv.height * fps * 0.07), 1.5e6, 10e6);
       rec.mr = mime ? new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate })
                     : new MediaRecorder(stream);
       rec.mr.ondataavailable = (e) => { if (e.data && e.data.size) rec.chunks.push(e.data); };
@@ -1136,15 +1155,18 @@
       return;
     }
 
-    const w = state.view.w, h = state.view.h;
-    const fps = clamp(parseInt($('#capFps').value, 10) || 30, 5, 60);
+    let w = state.view.w, h = state.view.h;
+    let fps = clamp(parseInt($('#capFps').value, 10) || 30, 5, 60);
+    const forceCanvas = $('#forceCanvas') && $('#forceCanvas').checked;
+    const lowPower = $('#lowPower') && $('#lowPower').checked;
+    if (lowPower) { fps = 10; }
 
     rec.active = true; rec.busy = false; rec.frames = 0; rec.chunks = [];
     rec.events = []; rec.rrwebOk = false; rec.h2cFailed = false;
     rec.failed = 0; rec.failedRun = 0; rec.lastError = ''; rec.mrStarted = false;
     rec.track = null; rec.manual = false; rec.lastShot = null; rec.stream = null;
     rec.mode = 'stream';
-    rec.statsTimer = null;
+    rec.statsTimer = null; rec.preflightTimer = null; rec.fallbackTimer = null;
     rec.startedAt = performance.now();
 
     /* UI flips first: the setup below is async and must never look like a hang */
@@ -1179,6 +1201,11 @@
       }
     });
 
+    if (forceCanvas) {
+      setStatus('rec', 'Recording with the canvas path (forced)…');
+      startCanvasRecording(fps, w, h);
+      return;
+    }
     /* Fast path: record the iframe's actual compositor output. Pixel-perfect. */
     const direct = getIframeStream(fps);
     if (direct) {
@@ -1196,6 +1223,8 @@
     rec.active = false;
     clearTimeout(rec.timerId); rec.timerId = null;
     clearInterval(rec.statsTimer); rec.statsTimer = null;
+    clearTimeout(rec.preflightTimer); rec.preflightTimer = null;
+    clearTimeout(rec.fallbackTimer); rec.fallbackTimer = null;
     clearInterval(clockId);
     if (rec.stopRR) { try { rec.stopRR(); } catch (e) {} rec.stopRR = null; }
 
@@ -1227,7 +1256,14 @@
     $('#recClock').textContent = fmt(0);
     $('#recHint').textContent = 'Only the laptop screen is captured — never the sidebar or toolbar.';
 
-    if (!rec.videoBlob) { toast('No frames were captured. Give the page a moment, then try again.', 'bad', 6000); return; }
+    if (!rec.videoBlob) {
+      const why = rec.mode === 'stream'
+        ? 'The browser\'s compositor didn\'t produce any frames. Try: turn on "Force canvas capture", lower the resolution to 0.5×, drop the frame rate to 10 fps, or close other tabs to free memory.'
+        : 'The canvas capture loop produced no frames. Try: lower the resolution to 0.5×, drop the frame rate to 10 fps, or close other tabs to free memory.';
+      toast(why, 'bad', 9000);
+      setStatus('ready', 'Recording failed — no frames captured');
+      return;
+    }
 
     const v = $('#outVideo');
     if (v.src) URL.revokeObjectURL(v.src);
@@ -1515,6 +1551,18 @@
   $('#recBtn').addEventListener('click', () => (rec.active ? stopRecording() : startRecording()));
   $('#capMode').addEventListener('change', (e) => setCapMode(e.target.value, ''));
   $('#inlineRemote').addEventListener('change', () => { if ($('#inlineRemote').checked) scheduleRemoteInline(); });
+  $('#lowPower').addEventListener('change', (e) => {
+    if (e.target.checked) {
+      const s = $('#capScale'); if (s.value !== '0.5') s.value = '0.5';
+      const f = $('#capFps'); if (f.value !== '10') f.value = '10';
+    }
+  });
+  $('#capScale').addEventListener('change', (e) => {
+    if (e.target.value !== '0.5' && $('#lowPower') && $('#lowPower').checked) $('#lowPower').checked = false;
+  });
+  $('#capFps').addEventListener('change', (e) => {
+    if (e.target.value !== '10' && $('#lowPower') && $('#lowPower').checked) $('#lowPower').checked = false;
+  });
   $('#dlVideo').addEventListener('click', () => {
     if (!rec.videoBlob) return;
     download(rec.videoBlob, baseName() + '.webm');

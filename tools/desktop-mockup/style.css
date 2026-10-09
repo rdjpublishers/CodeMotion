@@ -302,9 +302,9 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
   position: relative; border-radius: 10px; overflow: hidden; background: #0a0a0c;
   box-shadow: 0 0 0 3px #17171c, 0 0 0 4px #35353e, 0 0 22px rgba(0, 0, 0, .6);
 }
-.screen-fit { position: relative; overflow: hidden; }
-.screen { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
-.screen iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.screen-fit { position: relative; overflow: hidden; contain: paint; }
+.screen { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+.screen iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; will-change: transform; }
 .rec-ring { position: absolute; inset: 0; border-radius: 10px; pointer-events: none; border: 0 solid transparent; transition: border-color .2s; }
 .macbook.is-recording .rec-ring { border: 3px solid var(--bad); box-shadow: inset 0 0 26px rgba(255, 107, 107, .35); animation: recpulse 1.4s ease-in-out infinite; }
 .macbook.is-recording .mac-lid { box-shadow: 0 0 0 2px var(--bad), 0 34px 80px -22px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255, 255, 255, .9); }

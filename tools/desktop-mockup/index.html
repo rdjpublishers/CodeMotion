@@ -272,6 +272,14 @@
         </div>
         <p class="hint" id="capNote">Faithful hands the real DOM to the browser, so blur, masks, blend modes and clip paths survive. It needs every asset same-origin.</p>
         <label class="check">
+          <input type="checkbox" id="forceCanvas">
+          <span>Force canvas capture <em>(use only if the compositor path produces no frames)</em></span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="lowPower">
+          <span>Low-power recording <em>(0.5&times; at 10 fps &mdash; lighter on the GPU)</em></span>
+        </label>
+        <label class="check">
           <input type="checkbox" id="inlineRemote" checked>
           <span>Inline remote assets <em>(CDN fonts &amp; images)</em></span>
         </label>

@@ -277,6 +277,23 @@ tool detects this and says so instead of failing silently.
 Recording is **video only**. Audio playing inside the preview is not captured, because a canvas
 capture stream has no audio track and browsers do not expose a page's output for taping.
 
+### When the compositor doesn't produce frames
+
+On a slow device or with a very heavy page, the iframe's compositor can be overloaded and the
+`captureStream` may produce no frames. The tool handles this two ways:
+
+- **Pre-flight check at 3 s** — if no chunks have arrived, the status bar shows
+  *"Still waiting for the first frame — the page may be heavy"*.
+- **Automatic canvas fallback at 5 s** — the recorder switches to the html2canvas path so you
+  still get a video.
+- **Manual "Force canvas capture" checkbox** — skip the compositor path entirely if you know
+  the page is too heavy.
+- **"Low-power recording" checkbox** — snaps the resolution to 0.5× and the frame rate to 10 fps,
+  which is light enough to work on almost any device.
+
+The error toast at the end is specific: it tells you which path failed and exactly which setting
+to change. The old generic *"Give the page a moment, then try again"* message is gone.
+
 ---
 
 ## Notes
